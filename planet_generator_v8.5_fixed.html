@@ -87,6 +87,13 @@ input[type="color"]::-webkit-color-swatch{border:1px solid rgba(35,90,190,0.4);b
 </head>
 <body>
 <button id="panel-toggle" title="Colapsar/Expandir panel">&#9664; PANEL</button>
+<div id="loader" style="position:fixed;inset:0;background:#000;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#3bf;font-family:'Courier New',monospace;transition:opacity 0.5s;">
+  <div style="font-size:12px;letter-spacing:4px;margin-bottom:24px;opacity:0.8">GENERANDO PLANETA</div>
+  <div style="width:240px;height:2px;background:rgba(60,140,255,0.15);position:relative;overflow:hidden">
+    <div id="loaderBar" style="position:absolute;left:0;top:0;height:100%;width:0%;background:#3bf;transition:width 0.3s"></div>
+  </div>
+  <div id="loaderMsg" style="margin-top:16px;font-size:9px;color:#446;letter-spacing:1px">Inicializando...</div>
+</div>
 <div id="root">
   <div id="cc"></div>
   <div id="panel">
@@ -167,6 +174,7 @@ input[type="color"]::-webkit-color-swatch{border:1px solid rgba(35,90,190,0.4);b
       <button class="tb on" id="bRes128">128</button>
       <button class="tb" id="bRes256">256</button>
       <button class="tb" id="bRes512">512</button>
+      <button class="tb" id="bRes1024" style="grid-column:span 3">1024 (Experimental)</button>
     </div>
     <div style="margin:6px 0;font-size:8px;color:#446">CALIDAD RENDER (DPR)</div>
     <div class="cg">
@@ -185,6 +193,7 @@ input[type="color"]::-webkit-color-swatch{border:1px solid rgba(35,90,190,0.4);b
     </div>
     <div class="cg">
       <button class="tb" id="bRnd">&#8635; SEED</button>
+      <button class="tb" id="bHardReset" style="grid-column:span 3;margin-top:3px">&#8635; RESET F&#193;BRICA</button>
       <button class="tb" id="bShot">&#128247; FOTO</button>
       <button class="tb" id="bExportGLB">&#128230; GLB</button>
     </div>
@@ -521,8 +530,30 @@ let _rng=mulberry32(12345);function seededRandom(){return _rng();}function setSe
 const NZ=`
 float h3(vec3 p){p=fract(p*0.31830+vec3(0.11));p*=17.0;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
 float noise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*f*(f*(f*6.0-15.0)+10.0);return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),f.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),f.x),f.y),mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),f.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),f.x),f.y),f.z);}
-float fbm(vec3 p,float r){float v=0.0,a=0.5,m=0.0;for(int i=0;i<4;i++){v+=a*noise(p);m+=a;a*=r;p*=2.13;}return v/m;}
-float ridged(vec3 p,float r){float v=0.0,a=0.5,m=0.0;for(int i=0;i<4;i++){float n=noise(p);n=1.0-abs(2.0*n-1.0);v+=a*n*n;m+=a;a*=r;p*=2.13;}return v/m;}
+// v10: LOD adaptativo — el fragment shader pide menos octavas cuando la geometría ya las aporta
+float fbm(vec3 p,float r){
+  #ifdef HIGH_QUALITY
+    float v=0.0,a=0.5,m=0.0;
+    for(int i=0;i<6;i++){v+=a*noise(p);m+=a;a*=r;p=p*2.03+vec3(0.17,0.31,0.53);}
+    return v/m;
+  #else
+    float v=0.0,a=0.5,m=0.0;
+    for(int i=0;i<4;i++){v+=a*noise(p);m+=a;a*=r;p=p*2.13+vec3(0.17,0.31,0.53);}
+    return v/m;
+  #endif
+}
+float fbm3(vec3 p,float r){float v=0.0,a=0.5,m=0.0;for(int i=0;i<3;i++){v+=a*noise(p);m+=a;a*=r;p*=2.13;}return v/m;}
+float ridged(vec3 p,float r){
+  #ifdef HIGH_QUALITY
+    float v=0.0,a=0.5,m=0.0;
+    for(int i=0;i<5;i++){float n=noise(p);n=1.0-abs(2.0*n-1.0);v+=a*n*n;m+=a;a*=r;p=p*2.13+vec3(0.71,1.13,0.37);}
+    return v/m;
+  #else
+    float v=0.0,a=0.5,m=0.0;
+    for(int i=0;i<4;i++){float n=noise(p);n=1.0-abs(2.0*n-1.0);v+=a*n*n;m+=a;a*=r;p*=2.13;}
+    return v/m;
+  #endif
+}
 float crater(vec3 p,vec3 center,float radius,float depth){float ruidito=fbm(p*8.0+vec3(5.2),0.5)*0.15;float d=distance(p,center);float radioRuidoso=radius*(1.0+ruidito);if(d>radioRuidoso*1.5)return 0.0;float bowl=1.0-smoothstep(0.0,radioRuidoso,d);bowl=pow(bowl,2.2)*depth;float rimWidth=radioRuidoso*0.18;float rim=smoothstep(radioRuidoso-rimWidth,radioRuidoso,d)*(1.0-smoothstep(radioRuidoso,radioRuidoso+rimWidth*0.4,d));return(bowl-(rim*depth*0.35));}
 
 float hash2_c(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
@@ -589,7 +620,8 @@ float getDispH(vec3 p){
   if(uRd>0.5) return ridged(p,uR);
   float damp=clamp(pow(3.0/max(uSc,0.5),0.5),0.55,1.30);
   vec3 pCont=p*damp;
-  vec3 q=vec3(fbm(pCont,uR),fbm(pCont+vec3(5.2,1.3,0.4),uR),fbm(pCont+vec3(1.7,9.2,3.4),uR));
+  // En el vertex, usar la versión rápida (3 octavas forzadas):
+  vec3 q=vec3(fbm3(pCont,uR),fbm3(pCont+vec3(5.2,1.3,0.4),uR),fbm3(pCont+vec3(1.7,9.2,3.4),uR));
   float continent=fbm(pCont+q*uWp*1.8,uR);
   float ridge=ridged(p*1.9+q*0.7,0.55);
   float mask=smoothstep(0.42,0.58,continent);
@@ -609,10 +641,14 @@ void main(){
     pos=position+normal*centered*uDispScale*2.35;
   }
   vDisp=h;
-  vCrack = (uCracked>0.5) ? crackPattern(normalize(position)*uSc+vec3(uS*0.1),uS) : 0.0;
+  if(uCracked > 0.5){
+    vCrack = crackPattern(normalize(position)*uSc+vec3(uS*0.1),uS);
+  } else {
+    vCrack = 0.0;
+  }
   vP=pos;
   vec3 bumpN=normalize(normal);
-  if(uG<0.5 && uRelief>0.0){
+  if(uG<0.5 && uRelief>0.0 && uBumpScale>0.01){
     vec3 t1=normalize(cross(d,vec3(0.0,1.0,0.0)));
     if(length(t1)<0.001) t1=normalize(cross(d,vec3(1.0,0.0,0.0)));
     vec3 t2=normalize(cross(d,t1));
@@ -623,7 +659,7 @@ void main(){
     float hD=getDispH(normalize(d-t2*eps)*uSc+vec3(uS));
     float dhdx=(hL-hR)*0.5/eps;
     float dhdy=(hU-hD)*0.5/eps;
-    float bump=uBumpScale*uRelief*0.35;
+    float bump=uBumpScale*uRelief*0.55;
     bumpN=normalize(bumpN-t1*dhdx*bump-t2*dhdy*bump);
   }
   vBumpN=normalize(normalMatrix*bumpN);
@@ -680,10 +716,18 @@ float gasBand(vec3 d,float t,float seed,float sc,float detail){
 }
 
 vec3 ramp(float h,vec3 d){
-  float w1=fbm(d*3.5+vec3(uS*0.7),0.5);
-  float w2=fbm(d*8.0+vec3(uS*1.3,3.1,0.7),0.55);
-  float w3=noise(d*20.0+vec3(uS*2.1))-0.5;
-  float hw=clamp(h+(w1-0.5)*0.11+(w2-0.5)*0.055+w3*0.018,0.0,1.0);
+  float terrainScale=max(uSc,0.5);
+  vec3 warpPos=d*terrainScale*0.8+vec3(uS*0.7);
+  vec3 colorWarp=vec3(
+    fbm(warpPos,0.55),
+    fbm(warpPos+vec3(5.2,1.3,0.4),0.55),
+    fbm(warpPos+vec3(1.7,9.2,3.4),0.55)
+  );
+  vec3 colorPos=d*terrainScale+((colorWarp-0.5)*2.0)*0.22;
+  float w1=fbm(colorPos*1.4+vec3(uS*0.7),0.5);
+  float w2=fbm(colorPos*3.2+vec3(uS*1.3,3.1,0.7),0.55);
+  float w3=noise(colorPos*8.0+vec3(uS*2.1))-0.5;
+  float hw=clamp(h+(w1-0.5)*0.14+(w2-0.5)*0.07+w3*0.025,0.0,1.0);
   float w[12];
   w[0]=uW0;w[1]=uW1;w[2]=uW2;w[3]=uW3;w[4]=uW4;w[5]=uW5;
   w[6]=uW6;w[7]=uW7;w[8]=uW8;w[9]=uW9;w[10]=uW10;w[11]=uW11;
@@ -704,14 +748,14 @@ vec3 ramp(float h,vec3 d){
   int nextIdx=min(idx+1,11);
   vec3 c1=cols[idx];
   vec3 c2=cols[nextIdx];
-  float toneNoise=fbm(d*12.0+vec3(uS*3.0),0.55);
-  float brightNoise=fbm(d*28.0+vec3(uS*5.1),0.5);
-  float grainNoise=noise(d*90.0+vec3(uS*8.7))-0.5;
-  vec3 warm=vec3(1.05,1.01,0.94);
-  vec3 cool=vec3(0.95,0.99,1.06);
+  float toneNoise=fbm(d*terrainScale*4.0+vec3(uS*3.0),0.55);
+  float brightNoise=fbm(d*terrainScale*9.0+vec3(uS*5.1),0.5);
+  float grainNoise=noise(d*terrainScale*30.0+vec3(uS*8.7))-0.5;
+  vec3 warm=vec3(1.16,1.03,0.84);
+  vec3 cool=vec3(0.84,0.97,1.18);
   vec3 tone=mix(cool,warm,toneNoise);
-  float brightness=0.94+brightNoise*0.12;
-  float grain=1.0+grainNoise*0.025;
+  float brightness=0.92+brightNoise*0.16;
+  float grain=1.0+grainNoise*0.04;
   c1*=tone*brightness*grain;
   c2*=tone*brightness*grain;
   float t=clamp(localT,0.0,1.0);
@@ -785,9 +829,10 @@ vec3 getWaterColor(vec3 d,float h,float waterMask){
   waterCol+=vec3(ripple*0.35,ripple*0.62,ripple);
   // waterCol+=vec3(0.14,0.55,0.48)*caustic*shelf*0.22; // v8.5fix: reduced GPU load
   vec3 viewDir=normalize(cameraPosition-vW);
-  float fresnel=pow(1.0-max(dot(d,viewDir),0.0),3.0);
-  waterCol=mix(waterCol,vec3(0.55,0.68,0.86),fresnel*uWaterFresnel*0.85);
-  float subsurface=max(0.0,dot(d,uL))*(1.0-waterDepth)*uWaterSubsurface;
+  float viewFacing=clamp(dot(d,viewDir),0.0,1.0);
+  float graze=smoothstep(0.55,0.95,1.0-viewFacing);
+  waterCol=mix(waterCol,vec3(0.55,0.68,0.86),graze*uWaterFresnel*0.85);
+  float subsurface=pow(max(dot(d,uL),0.0),3.0)*pow(1.0-waterDepth,3.0)*uWaterSubsurface;
   waterCol+=vec3(0.08,0.48,0.42)*subsurface;
   float foam=smoothstep(uW+0.012,uW-0.006,h)*smoothstep(uW-0.05,uW-0.012,h)*0.55;
   foam+=noise(d*uSc*25.0+vec3(uS*2.0,uT*0.4,0.0))*0.05*smoothstep(uW+0.01,uW-0.01,h);
@@ -808,73 +853,83 @@ void main(){
     for(int i=0;i<20;i++){if(float(i)>=uCraterCount||uCraterCount<=0.0)break;craterMod+=crater(d,uCraterCenters[i],uCraterRadii[i],uCraterDepths[i]);}
     h-=craterMod*0.8;
   }
-  // ============ SISTEMA DE EROSIÓN HÍDRICA ============
+  // ============ SISTEMA DE EROSIÓN HÍDRICA v2 ============
   float microTerrain = 0.0;
   float microRidge   = 0.5;
   float slopeMask    = 0.0;
   float valleyMask   = 0.5;
+  vec3 N=normalize(vBumpN);
 
   if(uG<0.5){
+    // Warp simplificado: una fbm compartida y un detalle barato de alta frecuencia
     vec3 warpPos = d * uSc * 1.8 + vec3(uS*0.3);
-    vec3 warp = vec3(
-      fbm(warpPos, 0.55),
-      fbm(warpPos + vec3(5.2, 1.3, 0.4), 0.55),
-      fbm(warpPos + vec3(1.7, 9.2, 3.4), 0.55)
-    );
-    vec3 dWarp = normalize(d + warp * 0.25 * uErosionAmount);
+    float wBase = fbm(warpPos, 0.55);
+    float wDetail = noise(warpPos * 4.7 + vec3(uS*1.9)) - 0.5;
+    vec3 warp = vec3(wBase, wBase * 0.92 + 0.04, wBase * 0.84 + 0.08) + wDetail * 0.15;
+    vec3 dWarp = normalize(d + warp * 0.40 * uErosionAmount);
 
-    float r1 = 1.0 - ridged(dWarp * uSc * 3.5 + vec3(uS*0.17), 0.55);
-    float r2 = 1.0 - ridged(dWarp * uSc * 8.0 + vec3(uS*0.31, 7.3, 1.2), 0.55);
-    float r3 = 1.0 - ridged(dWarp * uSc * 18.0 + vec3(uS*0.53, 3.9, 8.1), 0.55);
-    float r4 = noise(dWarp * uSc * 45.0 + vec3(uS*0.71, 2.7, 5.3)) - 0.5;
+    // Dos capas FBM más el detalle de ruido
+    float f1 = fbm(dWarp * uSc * 3.5 + vec3(uS*0.17), 0.55);
+    float f2 = fbm(dWarp * uSc * 12.0 + vec3(uS*0.31,7.3,1.2), 0.55);
+    float f4 = noise(dWarp * uSc * 45.0 + vec3(uS*0.71,2.7,5.3));
 
-    microRidge = r1 * 0.40 + r2 * 0.35 + r3 * 0.20 + (r4 + 0.5) * 0.05;
+    // Erosión controla la nitidez de las crestas (0=redondeado, 1.5=cortante)
+    float sharpness = clamp(0.20 + uErosionAmount * 0.30, 0.15, 0.65);
+    float safeSharpness = min(sharpness, 0.49);
+    float r2soft = smoothstep(safeSharpness, 1.0-safeSharpness, f2);
 
-    vec3 t1 = normalize(cross(d, vec3(0.0, 1.0, 0.0)));
-    if(length(t1) < 0.001) t1 = normalize(cross(d, vec3(1.0, 0.0, 0.0)));
-    vec3 t2 = normalize(cross(d, t1));
+    // Mezcla base con peso modulado por erosión
+    float erosionW = clamp(uErosionAmount, 0.0, 1.5) / 1.5;
+    microRidge = f1 * (0.60 - erosionW*0.10)
+               + r2soft * (0.35 + erosionW*0.10)
+               + f4 * 0.05;
 
-    float eps = 0.004;
-    float hL = ridged((d + t1*eps) * uSc * 8.0 + vec3(uS*0.31,7.3,1.2), 0.55);
-    float hR = ridged((d - t1*eps) * uSc * 8.0 + vec3(uS*0.31,7.3,1.2), 0.55);
-    float hU = ridged((d + t2*eps) * uSc * 8.0 + vec3(uS*0.31,7.3,1.2), 0.55);
-    float hD = ridged((d - t2*eps) * uSc * 8.0 + vec3(uS*0.31,7.3,1.2), 0.55);
+    // Pendiente derivada de la normal ya perturbada, sin muestras adicionales
+    slopeMask = clamp(length(N.xy) * 1.4, 0.0, 1.0);
+    valleyMask = smoothstep(0.38, 0.58, microRidge);
 
-    float slopeX = (hL - hR) * 0.5 / eps;
-    float slopeY = (hU - hD) * 0.5 / eps;
-    slopeMask = clamp(sqrt(slopeX*slopeX + slopeY*slopeY) * 0.4, 0.0, 1.0);
-    valleyMask = smoothstep(0.35, 0.55, microRidge);
-    microTerrain = (microRidge - 0.5) * 0.12;
-    microTerrain *= uMicroRelief;
+    // Desplazamiento con amplitud CAPADA (no crece linealmente con el slider)
+    float dispAmplitude = 0.10 * (1.0 - exp(-uMicroRelief * 0.8));
+    microTerrain = (microRidge - 0.5) * dispAmplitude;
   }
   float hDetail = clamp(h + microTerrain * uRelief, 0.0, 1.0);
   // =====================================================
-  vec3 N=normalize(vBumpN);
   vec3 col=ramp(hDetail,d);
-  // ============ COLOR CONDICIONADO POR EROSIÓN ============
+  // ============ COLOR CONDICIONADO POR EROSIÓN v3 ============
   if(uG<0.5 && uMicroRelief > 0.0){
-    float ridgeMod = (microRidge - 0.5) * 0.28 * uMicroRelief;
-    col *= 1.0 + ridgeMod;
+    float colorFactor = clamp(uMicroRelief / 2.5, 0.0, 1.0);
 
+    // --- 1. Luminosidad: crestas más claras, valles más oscuros ---
+    // Capado a ±0.15 para no quemar los colores
+    float ridgeMod = clamp((microRidge - 0.5) * 0.45, -0.5, 0.5) * colorFactor;
+    col *= (1.0 + ridgeMod * 0.40);
+
+    // --- 2. Vegetación en valles (verde saturado) ---
     float isVeg = step(col.r, col.g) * step(col.b, col.g);
-    vec3 vegColor = col * vec3(0.72, 0.95, 0.68);
+    vec3 vegColor = vec3(col.r * 0.75, col.g * 1.05, col.b * 0.70);
     float vegMask = valleyMask * isVeg * (1.0 - slopeMask);
-    col = mix(col, vegColor, vegMask * 0.55 * uMicroRelief * uSlopeColor);
+    col = mix(col, vegColor, vegMask * 0.80 * colorFactor * uSlopeColor);
 
-    vec3 rockLight = vec3(0.68, 0.60, 0.48);
-    vec3 rockDark  = vec3(0.38, 0.32, 0.26);
-    float rockNoise = noise(d * uSc * 55.0 + vec3(uS*7.3)) - 0.5;
-    vec3 rockColor = mix(rockDark, rockLight, slopeMask + rockNoise * 0.15);
-    float rockMask = smoothstep(0.35, 0.75, slopeMask);
-    col = mix(col, rockColor, rockMask * 0.65 * uSlopeColor);
+    // --- 3. Roca en pendientes (más sutil) ---
+    vec3 rockLight = vec3(0.62, 0.55, 0.44);
+    vec3 rockDark  = vec3(0.34, 0.29, 0.24);
+    float rockNoise = noise(d * uSc * 55.0 + vec3(uS*7.3));
+    vec3 rockColor = mix(rockDark, rockLight, clamp(slopeMask + rockNoise * 0.20, 0.0, 1.0));
+    float rockMask = smoothstep(0.45, 0.85, slopeMask);
+    col = mix(col, rockColor, rockMask * 0.70 * colorFactor * uSlopeColor);
 
-    vec3 siltColor = vec3(0.82, 0.74, 0.58);
-    float siltMask = valleyMask * (1.0 - slopeMask) * smoothstep(0.55, 0.75, hDetail);
-    col = mix(col, siltColor, siltMask * 0.25 * uSlopeColor);
+    // --- 4. Arena/limo en zonas planas bajas ---
+    vec3 siltColor = vec3(0.78, 0.70, 0.55);
+    float siltMask = valleyMask * (1.0 - slopeMask) * smoothstep(0.55, 0.78, hDetail);
+    col = mix(col, siltColor, siltMask * 0.30 * colorFactor * uSlopeColor);
 
+    // --- 5. Grano fino (reducido) ---
     float grain = noise(d * uSc * 120.0 + vec3(uS*9.1)) - 0.5;
-    col *= 1.0 + grain * 0.07 * uMicroRelief;
-    col *= 1.0 - (1.0 - microRidge) * 0.18 * uMicroRelief;
+    col *= 1.0 + grain * 0.08 * colorFactor;
+
+    // --- 6. AO en valles ---
+    float ao = 1.0 - (1.0 - microRidge) * 0.22 * colorFactor;
+    col *= ao;
   }
   // =========================================================
   float waterMask=0.0;
@@ -991,9 +1046,9 @@ void main(){
         vec3 waveDir=t1*(w1+w3*0.5)+t2*(w2+w3*0.5);
         hd=normalize(hd+waveDir*uMicroReliefOcean*0.20);
       }
-      float tight=pow(max(dot(N,hd),0.0),400.0)*2.2;
-      float wide=pow(max(dot(N,hd),0.0),90.0)*0.14;
-      spec=(tight+wide)*specMask;
+      float tight=pow(max(dot(N,hd),0.0),800.0)*1.2;
+      float wide=pow(max(dot(N,hd),0.0),120.0)*0.05;
+      spec=(tight+wide)*specMask*0.7;
     }
     float terrainFresnel=pow(1.0-max(dot(N,viewDir),0.0),4.0);
     float terrainSpec=terrainFresnel*0.03*(1.0-waterSpecMask);
@@ -1022,20 +1077,23 @@ const CV=`varying vec3 vP,vN,vW;void main(){vP=position;vN=normalize(normalMatri
 const CF=`precision highp float;
 varying vec3 vP,vN,vW;
 uniform float uT,uS,uSc,uCv,uPo,uCloudDensity;
-${NZ}
+float h3_n(vec3 p){p=fract(p*0.31830+vec3(0.11));p*=17.0;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+float noise_n(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(mix(h3_n(i),h3_n(i+vec3(1,0,0)),f.x),mix(h3_n(i+vec3(0,1,0)),h3_n(i+vec3(1,1,0)),f.x),f.y),mix(mix(h3_n(i+vec3(0,0,1)),h3_n(i+vec3(1,0,1)),f.x),mix(h3_n(i+vec3(0,1,1)),h3_n(i+vec3(1,1,1)),f.x),f.y),f.z);}
+float fbmC(vec3 p,float r){float v=0.0,a=0.5,m=0.0;for(int i=0;i<3;i++){v+=a*noise_n(p);m+=a;a*=r;p*=2.13;}return v/m;}
 void main(){
   vec3 d=normalize(vP);
   vec3 cloudPos=d*uSc*1.2+vec3(uS+uT*0.08);
-  vec3 warp=vec3(fbm(cloudPos*0.8,0.55),fbm(cloudPos*0.8+vec3(5.2,1.3,0.4),0.55),fbm(cloudPos*0.8+vec3(1.7,9.2,3.4),0.55));
-  float h=fbm(cloudPos+warp*1.2,0.5);
-  h+=fbm(cloudPos*2.5+warp*0.6+vec3(0.5),0.5)*0.35;
+  // Reducido: 2 warp fbm en vez de 3, 1 fbm de nubes principal + noise en vez de segundo fbm
+  vec3 warp=vec3(fbmC(cloudPos*0.8,0.55), fbmC(cloudPos*0.8+vec3(5.2,1.3,0.4),0.55), 0.0);
+  float h=fbmC(cloudPos+warp*1.2,0.5);
+  h+=(noise_n(cloudPos*2.5+warp.x*0.6+vec3(0.5))-0.5)*0.35;
   h=h/1.35;
   float cloudMask=smoothstep(uCv+0.02, uCv+0.30, h);
   float poleFade=1.0-smoothstep(uPo-0.15,uPo+0.15,abs(d.y));
   cloudMask*=poleFade;
   vec3 litDir=normalize(vec3(1.4,0.6,1.0));
   float dif=max(0.0,dot(d,litDir))*0.35+0.65;
-  float shadowSample = h - (noise(cloudPos*1.5+litDir*2.0)-0.5)*0.35;
+  float shadowSample = h - (noise_n(cloudPos*1.5+litDir*2.0)-0.5)*0.35;
   float shadowMask=smoothstep(uCv+0.02,uCv+0.30,shadowSample);
   dif*=1.0-shadowMask*0.55;
   float cloudBump=dFdx(h)*0.4+dFdy(h)*0.4;
@@ -1076,6 +1134,12 @@ magenta:{n:'Magenta',ic:'&#128156;',desc:'Gigante gaseoso con tormentas de hidr&
 sandstorm:{n:'Tormenta',ic:'&#127786;&#65039;',desc:'Planeta con tormentas de arena permanentes.',w:-1.0,po:1.0,r:0.6,sc:2.2,cv:0.8,g:1,wp:1.8,lv:0,gl:0,am:0.1,rd:0,ring:false,dispScale:0.00,microRelief:0.0,ai:[0.7,0.6,0.4],aI:1.5,ci:[0.85,0.8,0.6],ni:[0.0,0.0,0.0],c:[[0.3,0.25,0.15],[0.45,0.38,0.22],[0.6,0.5,0.3],[0.7,0.6,0.4],[0.8,0.7,0.5],[0.9,0.8,0.6],[0.65,0.55,0.35],[0.5,0.42,0.25],[0.75,0.65,0.45],[0.55,0.45,0.28],[0.85,0.75,0.55],[0.95,0.88,0.7]],waterColors:[[0.3,0.25,0.15],[0.45,0.38,0.22],[0.6,0.5,0.3],[0.7,0.6,0.4],[0.8,0.7,0.5],[0.9,0.8,0.6],[0.65,0.55,0.35],[0.5,0.42,0.25]],waterWeights:[1.0,0.8,0.6,0.4,0.3,0.2,0.15,0.1]},
 cracked:{n:'Agrietado',ic:'&#127755;',desc:'Superficie de roca ultra oscura fracturada por magma.',w:-1.0,po:1.0,r:0.35,sc:2.1,cv:0.0,g:0,wp:0.0,lv:3.5,gl:0.5,am:0.02,rd:0,ring:false,dispScale:0.02,microRelief:0.2,ai:[0.95,0.15,0.02],aI:2.8,ci:[0.05,0.04,0.04],ni:[0.08,0.02,0.01],c:[[0.02,0.02,0.03],[0.04,0.04,0.05],[0.06,0.06,0.07],[0.08,0.08,0.09],[0.1,0.1,0.12],[0.15,0.15,0.18],[0.2,0.2,0.22],[0.02,0.02,0.03],[0.04,0.04,0.05],[0.06,0.06,0.07],[0.08,0.08,0.09],[0.1,0.1,0.12]],cracked:true,waterColors:[[0.02,0.02,0.03],[0.04,0.04,0.05],[0.06,0.06,0.07],[0.08,0.08,0.09],[0.1,0.1,0.12],[0.15,0.15,0.18],[0.2,0.2,0.22],[0.02,0.02,0.03]],waterWeights:[1.0,0.8,0.6,0.4,0.3,0.2,0.15,0.1]}
 };
+Object.assign(P.terrestrial,{
+  w:0.13,po:0.76,r:0.54,sc:2.00,cv:0.50,g:0,wp:0.65,
+  lv:0,gl:0,am:0.07,rd:0,ring:false,dispScale:0.00,microRelief:1.20,
+  relieveAmount:0.15,bumpScale:0.52,microReliefOcean:1.50,erosionAmount:0.95,slopeColor:1.00,
+  sp:0.40,atmRadius:1.00,cloudRadius:1.01,cloudDensity:1.71,coastRoughness:1.55
+});
 
 function safeToFixed(value, decimals) {
     if (value === undefined || value === null || isNaN(value)) return '0.00';
@@ -1095,17 +1159,18 @@ const S={
   bloom:false,
   res:128,
   p:{
-    w:0.42,po:0.76,r:0.54,sc:2.8,cv:0.5,wp:1.0,
-    relieveAmount:0.7,bumpScale:1.2,dispScale:0.08,
-    microRelief:0.5,microReliefOcean:0.6,erosionAmount:0.75,slopeColor:0.9,
-    sp:1.0,atmRadius:1.0,cloudDensity:0.65,cloudRadius:1.013,coastRoughness:1.0
+    w:0.13,po:0.76,r:0.54,sc:2.00,cv:0.50,wp:0.65,
+    relieveAmount:0.15,bumpScale:0.52,dispScale:0.00,
+    microRelief:1.20,microReliefOcean:1.50,erosionAmount:0.95,slopeColor:1.00,
+    sp:0.40,atmRadius:1.00,cloudDensity:1.71,cloudRadius:1.01,coastRoughness:1.55
   },
   colorWeights:[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0],
   craterCount:8,craterMaxSize:0.25,craterDepth:0.5,craters:[],
   magmaLevel:0.0,magmaIntensity:2.0,magmaColor:[1.5,0.4,0.05]
 };
+var moonEnabled=false,moons=[],moonParams={count:1,distance:2.2,size:0.22,speed:0.5},planetHistory=[];
 
-function showErr(m){const e=document.getElementById('emsg');e.textContent=m;e.classList.add('on');}
+function showErr(m){const e=document.getElementById('emsg');e.textContent=m;e.classList.add('on');const loader=document.getElementById('loader');if(loader)loader.remove();}
 
 const cv=document.createElement('canvas');
 document.getElementById('cc').appendChild(cv);
@@ -1113,7 +1178,7 @@ let renderer,composer,bloomPass;
 
 try{
 renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:false,preserveDrawingBuffer:true,powerPreference:'high-performance'});
-renderer.debug.checkShaderErrors=true;
+renderer.debug.checkShaderErrors=new URLSearchParams(window.location.search).has('debug');
 var _quality=1.0;
 function setRenderQuality(q){
   _quality=q;
@@ -1319,7 +1384,14 @@ let drag=false,lx=0,ly=0;
 cv.addEventListener('mousedown',e=>{const W=cv.getBoundingClientRect().width;if(e.offsetX<W){drag=true;lx=e.clientX;ly=e.clientY;}});
 window.addEventListener('mouseup',()=>drag=false);
 window.addEventListener('mousemove',e=>{if(!drag)return;sph.t-=(e.clientX-lx)*0.008;sph.p=Math.max(0.08,Math.min(Math.PI-0.08,sph.p-(e.clientY-ly)*0.008));lx=e.clientX;ly=e.clientY;updCam();requestRender();});
-cv.addEventListener('wheel',e=>{sph.r=Math.max(1.5,Math.min(7,sph.r+e.deltaY*0.004));updCam();requestRender();},{passive:true});
+var _wheelTimer = null;
+cv.addEventListener('wheel',e=>{
+  sph.r=Math.max(1.5,Math.min(7,sph.r+e.deltaY*0.004));
+  updCam();
+  // Debounce: solo re-renderiza si el usuario dejó de mover la rueda durante 80ms
+  if(_wheelTimer) clearTimeout(_wheelTimer);
+  _wheelTimer = setTimeout(requestRender, 80);
+},{passive:true});
 var panelEl=document.getElementById('panel');
 if(panelEl){
   panelEl.addEventListener('wheel',function(e){e.stopPropagation();},{passive:true});
@@ -1335,35 +1407,51 @@ function rgb(col,arr){col.r=arr[0];col.g=arr[1];col.b=arr[2];}
 let needsRender=true;
 function requestRender(){needsRender=true;}
 
-function applyPreset(key){
+function applyPreset(key,preserveParams){
   const pr=P[key];S.cur=key;
   // Auto-adjust color weights to spread colors across visible FBM range
   // FBM outputs roughly [0.35, 0.65], water at ~0.42, so visible terrain is [0.42, 0.65]
   // Spread weights to emphasize middle indices where terrain is visible
-  if(!pr.g||pr.g<0.5){
+  if(!preserveParams&&(!pr.g||pr.g<0.5)){
     S.colorWeights=[0.85,1.00,1.10,1.15,1.20,1.15,0.90,1.15,1.10,0.95,0.80,0.65];
   }
-  S.p.w=pr.w;S.p.po=pr.po;S.p.r=pr.r;S.p.sc=pr.sc;S.p.cv=pr.cv;
-  S.p.wp=pr.wp;S.p.dispScale=pr.dispScale||0.01;S.p.microRelief=pr.microRelief||0.5;
-  if(S.p.sp===undefined)S.p.sp=1.0;
+  if(!preserveParams){
+    S.p.w=pr.w;S.p.po=pr.po;S.p.r=pr.r;S.p.sc=pr.sc;S.p.cv=pr.cv;
+    S.p.wp=pr.wp;
+    S.p.dispScale=pr.dispScale!==undefined?pr.dispScale:0.01;
+    S.p.microRelief=pr.microRelief!==undefined?pr.microRelief:0.5;
+    S.p.relieveAmount=pr.relieveAmount!==undefined?pr.relieveAmount:0.7;
+    S.p.bumpScale=pr.bumpScale!==undefined?pr.bumpScale:1.2;
+    S.p.microReliefOcean=pr.microReliefOcean!==undefined?pr.microReliefOcean:0.6;
+    S.p.erosionAmount=pr.erosionAmount!==undefined?pr.erosionAmount:0.7;
+    S.p.slopeColor=pr.slopeColor!==undefined?pr.slopeColor:0.8;
+    S.p.sp=pr.sp!==undefined?pr.sp:1.0;
+    S.p.atmRadius=pr.atmRadius!==undefined?pr.atmRadius:1.0;
+    S.p.cloudDensity=pr.cloudDensity!==undefined?pr.cloudDensity:0.65;
+    S.p.cloudRadius=pr.cloudRadius!==undefined?pr.cloudRadius:1.013;
+    S.p.coastRoughness=pr.coastRoughness!==undefined?pr.coastRoughness:1.0;
+  }
   const u=pMat.uniforms;
-  if(u.uW)u.uW.value=pr.w;
-  if(u.uPo)u.uPo.value=pr.po;
-  if(u.uR)u.uR.value=pr.r;
-  if(u.uSc)u.uSc.value=pr.sc*(S.res>=256?1.4:1.0)*(S.res>=512?1.8/1.4:1.0);
+  if(u.uW)u.uW.value=S.p.w;
+  if(u.uPo)u.uPo.value=S.p.po;
+  if(u.uR)u.uR.value=S.p.r;
+  if(u.uSc)u.uSc.value=S.p.sc*(S.res>=512?1.8:S.res>=256?1.4:1.0);
   if(u.uG)u.uG.value=pr.g;
-  if(u.uWp)u.uWp.value=pr.wp;
+  if(u.uWp)u.uWp.value=S.p.wp;
   if(u.uLv)u.uLv.value=pr.lv;
   if(u.uGl)u.uGl.value=pr.gl;
   if(u.uAm)u.uAm.value=pr.am;
   if(u.uRd)u.uRd.value=pr.rd||0;
   if(u.uCracked)u.uCracked.value=pr.cracked?1.0:0.0;
   if(u.uGasDetail)u.uGasDetail.value=pr.g>0.5?1.2:0.0;
-  if(u.uCoastRoughness)u.uCoastRoughness.value=1.0;
-  if(u.uDispScale)u.uDispScale.value=pr.dispScale||0.01;
-  if(u.uMicroRelief)u.uMicroRelief.value=pr.microRelief||0.5;
-  if(u.uErosionAmount)u.uErosionAmount.value=S.p.erosionAmount!==undefined?S.p.erosionAmount:0.75;
-  if(u.uSlopeColor)u.uSlopeColor.value=S.p.slopeColor!==undefined?S.p.slopeColor:0.9;
+  if(u.uCoastRoughness)u.uCoastRoughness.value=S.p.coastRoughness;
+  var resolutionScale=S.res>=512?0.25:S.res>=256?0.5:1.0;
+  if(u.uDispScale)u.uDispScale.value=S.p.dispScale*resolutionScale;
+  if(u.uRelief)u.uRelief.value=S.rel?S.p.relieveAmount:0.0;
+  if(u.uBumpScale)u.uBumpScale.value=S.p.bumpScale;
+  if(u.uMicroRelief)u.uMicroRelief.value=S.p.microRelief;
+  if(u.uErosionAmount)u.uErosionAmount.value=S.p.erosionAmount;
+  if(u.uSlopeColor)u.uSlopeColor.value=S.p.slopeColor;
   if(u.uMicroReliefOcean)u.uMicroReliefOcean.value=S.p.microReliefOcean;
   if(u.uAtmColor)rgb(u.uAtmColor.value,pr.ai);
   if(u.uAtmDensity)u.uAtmDensity.value=pr.aI;
@@ -1378,11 +1466,16 @@ function applyPreset(key){
     }
   }
   if(u.uN)rgb(u.uN.value,pr.ni);
-  if(cMat.uniforms.uCv)cMat.uniforms.uCv.value=pr.cv;
-  if(cMat.uniforms.uSc)cMat.uniforms.uSc.value=pr.sc*(S.res>=256?1.4:1.0)*(S.res>=512?1.8/1.4:1.0);
-  if(cMat.uniforms.uCloudDensity)cMat.uniforms.uCloudDensity.value=S.p.cloudDensity||1.0;
+  if(cMat.uniforms.uCv)cMat.uniforms.uCv.value=S.p.cv;
+  if(cMat.uniforms.uSc)cMat.uniforms.uSc.value=S.p.sc*(S.res>=512?1.8:S.res>=256?1.4:1.0);
+  if(cMat.uniforms.uCloudDensity)cMat.uniforms.uCloudDensity.value=S.p.cloudDensity;
   if(aMat.uniforms.uCo)rgb(aMat.uniforms.uCo.value,pr.ai);
   if(aMat.uniforms.uI)aMat.uniforms.uI.value=pr.aI;
+  if(aMat.uniforms.uAtmRadius)aMat.uniforms.uAtmRadius.value=S.p.atmRadius;
+  const newCloudGeometry=new THREE.SphereGeometry(S.p.cloudRadius+S.p.dispScale+0.02,Math.max(32,S.res/2),Math.max(32,S.res/2));
+  mCl.geometry.dispose();mCl.geometry=newCloudGeometry;
+  const newAtmGeometry=new THREE.SphereGeometry(1.0+S.p.atmRadius*0.15,Math.max(128,S.res/2),Math.max(128,S.res/2));
+  mAt.geometry.dispose();mAt.geometry=newAtmGeometry;
   const bRng=document.getElementById('bRng');
   bRng.disabled=!pr.ring;
   if(!pr.ring){S.rng=false;mRi.visible=false;bRng.classList.remove('on');}
@@ -1555,9 +1648,9 @@ function buildSliders(){
     {k:'cv',l:'Nubes',mn:0.1,mx:0.9,st:0.01},
     {k:'po',l:'Polo',mn:0.2,mx:1.0,st:0.01,hide:pr.g>0.5||pr.po>=1.0},
     {k:'relieveAmount',l:'Cant. Relieve (Bump)',mn:0,mx:1.0,st:0.05,hide:pr.g>0.5},
-    {k:'bumpScale',l:'Escala Bump',mn:0.0,mx:3.0,st:0.05,hide:pr.g>0.5},
+    {k:'bumpScale',l:'Escala Bump',mn:0.0,mx:1.5,st:0.02,hide:pr.g>0.5},
     {k:'microRelief',l:'Micro-Relieve (Tierra)',mn:0,mx:2.5,st:0.05,hide:pr.g>0.5},
-    {k:'erosionAmount',l:'Erosión',mn:0,mx:2.0,st:0.05,hide:pr.g>0.5},
+    {k:'erosionAmount',l:'Erosión',mn:0,mx:1.5,st:0.05,hide:pr.g>0.5},
     {k:'slopeColor',l:'Color de Pendiente',mn:0,mx:2.0,st:0.05,hide:pr.g>0.5},
     {k:'microReliefOcean',l:'Micro-Relieve (Mar)',mn:0,mx:1.5,st:0.05,hide:pr.g>0.5||pr.w<0},
     {k:'dispScale',l:'Displacement Real',mn:0,mx:0.06,st:0.002,hide:pr.g>0.5},
@@ -1587,7 +1680,11 @@ function buildSliders(){
       if(sv)sv.textContent=safeToFixed(v,2);
       var u=pMat.uniforms;
       if(k==='w')u.uW.value=v;
-      else if(k==='sc'){u.uSc.value=v;if(cMat.uniforms.uSc)cMat.uniforms.uSc.value=v;}
+      else if(k==='sc'){
+        var scMult=S.res>=512?1.8:S.res>=256?1.4:1.0;
+        u.uSc.value=v*scMult;
+        if(cMat.uniforms.uSc)cMat.uniforms.uSc.value=v*scMult;
+      }
       else if(k==='r')u.uR.value=v;
       else if(k==='wp')u.uWp.value=v;
       else if(k==='cv'){if(cMat.uniforms.uCv)cMat.uniforms.uCv.value=v;}
@@ -1599,9 +1696,10 @@ function buildSliders(){
       else if(k==='slopeColor')u.uSlopeColor.value=v;
       else if(k==='microReliefOcean')u.uMicroReliefOcean.value=v;
       else if(k==='dispScale'){
-        u.uDispScale.value=v;
-        var newClRad=1.0+v+0.02;
-        var newClGeo=new THREE.SphereGeometry(newClRad,Math.max(128,S.res/2),Math.max(128,S.res/2));
+        var dispScale=v*(S.res>=512?0.25:S.res>=256?0.5:1.0);
+        u.uDispScale.value=dispScale;
+        var newClRad=S.p.cloudRadius+v+0.02;
+        var newClGeo=new THREE.SphereGeometry(newClRad,Math.max(32,S.res/2),Math.max(32,S.res/2));
         if(mCl.geometry)mCl.geometry.dispose();
         mCl.geometry=newClGeo;
       }
@@ -1682,27 +1780,36 @@ document.getElementById('bShot').addEventListener('click',()=>{
 });
 
 function setResolution(seg){
-  S.res=seg;
+  S.res = seg;
+  // LOD de octavas: baja resolución → más octavas (compensa); alta resolución → menos (la geometría ya aporta)
+  var highQuality = seg <= 256;
+  if(pMat){
+    pMat.defines = pMat.defines || {};
+    if(highQuality) pMat.defines.HIGH_QUALITY = '';
+    else delete pMat.defines.HIGH_QUALITY;
+    pMat.needsUpdate = true;
+  }
+  console.log('[res] seg=', seg, 'HQ=', highQuality);
   if(seg>=512&&_quality>1.0){setRenderQuality(1.0);updateQualityButtons(1.0);}
-  // Scale noise frequency with resolution for finer detail
-  var scMult=1.0;
-  if(seg>=256) scMult=1.4;
-  if(seg>=512) scMult=1.8;
+  // Scale noise frequency
+  var scMult=seg>=512?1.8:seg>=256?1.4:1.0;
   if(pMat&&pMat.uniforms&&pMat.uniforms.uSc) pMat.uniforms.uSc.value=S.p.sc*scMult;
   if(cMat&&cMat.uniforms&&cMat.uniforms.uSc) cMat.uniforms.uSc.value=S.p.sc*scMult;
   // Scale displacement down at high resolution
-  var dispScale=S.p.dispScale;
-  if(seg>=256) dispScale=S.p.dispScale*0.5;
-  if(seg>=512) dispScale=S.p.dispScale*0.25;
+  var dispScale=S.p.dispScale*(seg>=512?0.25:seg>=256?0.5:1.0);
   if(pMat&&pMat.uniforms&&pMat.uniforms.uDispScale) pMat.uniforms.uDispScale.value=dispScale;
-  const newPl=new THREE.SphereGeometry(1,Math.max(32,seg),Math.max(32,seg));
+  // Geometría: esfera UV para evitar facetas en la superficie
+  const newPl = new THREE.SphereGeometry(1, Math.max(32, seg), Math.max(32, seg));
   newPl.computeVertexNormals();
-  const newCl=new THREE.SphereGeometry(1.0+S.p.dispScale*0.35,Math.max(32,seg/2),Math.max(32,seg/2));
-  const newAt=new THREE.SphereGeometry(1.04,Math.max(32,seg/2),Math.max(32,seg/2));
+  const newCl = new THREE.SphereGeometry(S.p.cloudRadius+S.p.dispScale+0.02,Math.max(32,seg/2),Math.max(32,seg/2));
+  const newAt = new THREE.SphereGeometry(1.0+S.p.atmRadius*0.15,Math.max(128,seg/2),Math.max(128,seg/2));
   mPl.geometry.dispose();mPl.geometry=newPl;
   mCl.geometry.dispose();mCl.geometry=newCl;
   mAt.geometry.dispose();mAt.geometry=newAt;
-  [64,128,256,512].forEach(r=>{const btn=document.getElementById('bRes'+r);if(btn)btn.classList.toggle('on',r===seg);});
+  [64,128,256,512,1024].forEach(r=>{
+    const btn=document.getElementById('bRes'+r);
+    if(btn)btn.classList.toggle('on',r===seg);
+  });
   const trisEl=document.getElementById('tris');
   if(trisEl)trisEl.textContent=renderer.info.render.triangles;
   requestRender();
@@ -1712,6 +1819,8 @@ document.getElementById('bRes64').addEventListener('click',()=>setResolution(64)
 document.getElementById('bRes128').addEventListener('click',()=>setResolution(128));
 document.getElementById('bRes256').addEventListener('click',()=>setResolution(256));
 document.getElementById('bRes512').addEventListener('click',()=>setResolution(512));
+const btn1024=document.getElementById('bRes1024');
+if(btn1024)btn1024.addEventListener('click',()=>setResolution(1024));
 
 function updateQualityButtons(q){
   const map={0.5:'bQualLow',1.0:'bQualMed',1.5:'bQualHigh',2.0:'bQualUltra'};
@@ -1864,10 +1973,34 @@ function updSize(){
 new ResizeObserver(()=>{const cc=document.getElementById('cc');if(cc.clientWidth>0&&cc.clientHeight>0)updSize();}).observe(document.getElementById('cc'));
 window.addEventListener('resize',updSize);
 
-applyPreset('terrestrial');
+console.time('primer-frame');
+var hasSavedConfig=v9_lc();
+var savedResolution=hasSavedConfig?S.res:256;
+// Mantener moderada la resolución de toda geometría creada durante la carga inicial
+S.res=256;
+applyPreset(S.cur,hasSavedConfig);
+if(hasSavedConfig){
+  pMat.uniforms.uS.value=S.seed;
+  cMat.uniforms.uS.value=S.seed;
+  pMat.uniforms.uMagmaLevel.value=S.magmaLevel;
+  pMat.uniforms.uMagmaIntensity.value=S.magmaIntensity;
+  pMat.uniforms.uMagmaColor.value.setRGB(S.magmaColor[0],S.magmaColor[1],S.magmaColor[2]);
+  mAt.visible=S.atm;
+  mCl.visible=S.cld;
+  mRi.visible=S.rng&&P[S.cur].ring;
+  document.getElementById('bAtm').classList.toggle('on',S.atm);
+  document.getElementById('bCld').classList.toggle('on',S.cld);
+  document.getElementById('bRot').classList.toggle('on',S.rot);
+  document.getElementById('bRel').classList.toggle('on',S.rel);
+  document.getElementById('bBloom').classList.toggle('on',S.bloom);
+  document.getElementById('bRng').classList.toggle('on',mRi.visible);
+  if(S.bloom&&!hasPostprocessing)initPostprocessing();
+  if(bloomPass)bloomPass.enabled=S.bloom;
+}
 document.getElementById('pseed').textContent='seed: '+S.seed;
 updSize();
-setResolution(S.res);
+// Arranque seguro: mantener la geometría inicial en una resolución moderada
+setResolution(256);
 var initialQuality=window.devicePixelRatio>=2?1.5:1.0;
 setRenderQuality(initialQuality);
 updateQualityButtons(initialQuality);
@@ -1875,6 +2008,14 @@ updateQualityButtons(initialQuality);
 needsRender=true;
 if(hasPostprocessing&&S.bloom){composer.render();}else{renderer.render(scene,cam);}
 needsRender=false;
+console.timeEnd('primer-frame');
+
+// Restaurar la resolución guardada solo después de mostrar el primer frame
+requestAnimationFrame(function(){
+  requestAnimationFrame(function(){
+    if(hasSavedConfig&&savedResolution!==256)setResolution(savedResolution);
+  });
+});
 
 let t=0,lastTime=performance.now(),frameCount=0,lastFpsTime=performance.now();
 (function loop(){
@@ -1904,8 +2045,6 @@ let t=0,lastTime=performance.now(),frameCount=0,lastFpsTime=performance.now();
     frameCount=0;lastFpsTime=now;
   }
 })();
-
-var moonEnabled=false,moons=[],moonParams={count:1,distance:2.2,size:0.22,speed:0.5},planetHistory=[];
 
 const MoonNZ=`
 float h3_m(vec3 p){p=fract(p*0.31830+vec3(0.11));p*=17.0;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
@@ -2560,6 +2699,36 @@ document.addEventListener('keydown', function(e) {
     });
   }
 })();
+
+document.getElementById('bHardReset').addEventListener('click',()=>{
+  if(!confirm('¿Restaurar valores por defecto?'))return;
+  try{
+    localStorage.removeItem('exoPlanetConfig');
+    location.reload();
+  }catch(e){
+    console.error('No se pudo restaurar la configuración de fábrica:',e);
+    alert('No se pudo borrar la configuración guardada.');
+  }
+});
+
+function setLoaderProgress(pct,msg){
+  const bar=document.getElementById('loaderBar');
+  const txt=document.getElementById('loaderMsg');
+  if(bar)bar.style.width=Math.min(pct,100)+'%';
+  if(txt)txt.textContent=msg;
+}
+setLoaderProgress(20,'Compilando shaders...');
+requestAnimationFrame(function(){
+  setLoaderProgress(50,'Generando geometría...');
+  requestAnimationFrame(function(){
+    setLoaderProgress(80,'Renderizando primer frame...');
+    requestAnimationFrame(function(){
+      setLoaderProgress(100,'Listo');
+      const loader=document.getElementById('loader');
+      if(loader){loader.style.opacity='0';setTimeout(()=>loader.remove(),500);}
+    });
+  });
+});
 
 console.log('&#127757; Generador de Planetas v8.5 fixed loaded successfully');
 </script>
